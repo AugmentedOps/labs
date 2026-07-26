@@ -1,0 +1,113 @@
+# Ops Bits #001 — Kubernetes liveness, readiness, and startup probes
+# Video: "Your Pod Is Running. Your Service Is Dead."
+#
+# Two examples:
+#   1. payments-api — liveness + readiness, the numbers from the video
+#      (probe every 10s, 3 failures => ~30s time-to-detect)
+#   2. java-app     — a slow starter protected by a startupProbe
+#
+# Rule from the video, worth repeating here:
+#   liveness  = check YOUR process only (deadlock, hang)
+#   readiness = check whether you should receive traffic (dependencies)
+#   Never put dependency checks (DB, downstream APIs) in a liveness probe —
+#   that turns a database outage into a cluster-wide restart storm.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payments-api
+  labels:
+    app: payments-api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: payments-api
+  template:
+    metadata:
+      labels:
+        app: payments-api
+    spec:
+      containers:
+        - name: payments-api
+          image: ghcr.io/example/payments-api:1.0.0   # replace with your image
+          ports:
+            - containerPort: 8080
+
+          # Liveness: "is MY process alive?" — no dependency calls behind /healthz.
+          # failureThreshold (3) x periodSeconds (10) = ~30s time-to-detect.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 2
+
+          # Readiness: "should I receive traffic right now?"
+          # THIS is where dependency checks belong (/ready may check the DB).
+          # Failing readiness removes the pod from Service endpoints — no restart.
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            periodSeconds: 5
+            failureThreshold: 2
+            timeoutSeconds: 2
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: java-app
+  labels:
+    app: java-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: java-app
+  template:
+    metadata:
+      labels:
+        app: java-app
+    spec:
+      containers:
+        - name: java-app
+          image: ghcr.io/example/java-app:1.0.0       # replace with your image
+          ports:
+            - containerPort: 8080
+
+          # Slow starter (the video's ~40s JVM boot). Without protection, a
+          # liveness probe firing at 10s kills it mid-startup, forever:
+          # a self-inflicted CrashLoopBackOff.
+          #
+          # startupProbe gets its own generous failure budget:
+          # 30 x 2s = up to 60s allowed for boot. Liveness and readiness are
+          # DISABLED until the startup probe passes, then take over.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 2
+            failureThreshold: 30
+
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 2
+
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            periodSeconds: 5
+            failureThreshold: 2
+            timeoutSeconds: 2
+
+          # Alternative to startupProbe for mildly slow starters:
+          # add `initialDelaySeconds: 45` to the livenessProbe instead.
+          # startupProbe is better: it adapts to variable boot times instead
+          # of hardcoding a worst-case delay.
