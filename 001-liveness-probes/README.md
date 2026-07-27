@@ -9,9 +9,9 @@ Companion configs for **"Your Pod Is Running. Your Service Is Dead."** ([watch](
 
 ## Try it
 ```
-kubectl create namespace ops-bits
-kubectl apply -n ops-bits -f probes.yaml
-kubectl get pods -n ops-bits -w
+kubectl create namespace labs
+kubectl apply -n labs -f probes.yaml
+kubectl get pods -n labs -w
 ```
 The example images are placeholders — point them at any container that serves HTTP on 8080 (or `kubectl edit` the probe paths to match yours).
 
